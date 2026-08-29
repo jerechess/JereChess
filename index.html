@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JereChess — Juega. Aprende. Mejora.</title>
+  <meta name="description" content="JereChess es una aplicación de ajedrez para jugar, aprender, practicar y mejorar.">
+  <meta name="author" content="Jeremías Bolaños">
+  <meta name="theme-color" content="#0d1117">
+  <style>
+    :root{--bg:#0d1117;--bg2:#151b23;--card:#1b222c;--text:#f0f3f6;--muted:#9da7b3;--gold:#d4a72c;--gold2:#e5bd4a;--border:#2c3542;--max:1100px}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html{scroll-behavior:smooth}
+    body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
+    a{text-decoration:none;color:inherit}.container{width:min(92%,var(--max));margin:auto}
+    nav{position:sticky;top:0;z-index:10;background:rgba(13,17,23,.94);backdrop-filter:blur(12px);border-bottom:1px solid var(--border)}
+    .nav{min-height:68px;display:flex;align-items:center;justify-content:space-between}
+    .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:1.2rem}.logo-icon{width:38px;height:38px;display:grid;place-items:center;background:var(--gold);color:#111;border-radius:10px;font-size:1.45rem}
+    .links{display:flex;gap:25px;color:var(--muted);font-size:.94rem}.links a:hover{color:var(--text)}
+    .hero{min-height:620px;display:flex;align-items:center;position:relative;overflow:hidden}
+    .hero:before{content:"";position:absolute;width:600px;height:600px;right:-220px;top:-230px;background:radial-gradient(circle,rgba(212,167,44,.16),transparent 70%)}
+    .hero-content{max-width:760px;position:relative}.badge{display:inline-block;padding:7px 13px;margin-bottom:23px;border:1px solid var(--border);border-radius:999px;background:var(--bg2);color:var(--gold);font-size:.85rem;font-weight:700}
+    h1{font-size:clamp(3.1rem,8vw,5.5rem);line-height:.95;letter-spacing:-4px;margin-bottom:25px}h1 span{color:var(--gold)}
+    .hero p{max-width:650px;color:var(--muted);font-size:clamp(1.05rem,2vw,1.22rem);margin-bottom:30px}
+    .buttons{display:flex;flex-wrap:wrap;gap:12px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 21px;border-radius:10px;font-weight:750;transition:.2s}.btn:hover{transform:translateY(-2px)}
+    .primary{background:var(--gold);color:#111}.primary:hover{background:var(--gold2)}.secondary{border:1px solid var(--border);background:var(--bg2)}.secondary:hover{background:var(--card)}
+    section{padding:85px 0}.features{background:var(--bg2);border-block:1px solid var(--border)}
+    .head{max-width:680px;margin-bottom:42px}.head h2,.about h2,.download h2,.contact h2{font-size:clamp(2rem,5vw,3rem);line-height:1.05;letter-spacing:-1.5px;margin-bottom:13px}.head p,.about p,.download p,.contact p{color:var(--muted)}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.feature{padding:27px;background:var(--card);border:1px solid var(--border);border-radius:15px;transition:.2s}.feature:hover{transform:translateY(-4px)}
+    .icon{width:48px;height:48px;display:grid;place-items:center;margin-bottom:17px;border-radius:12px;background:rgba(212,167,44,.12);font-size:1.45rem}.feature h3{margin-bottom:8px}.feature p{color:var(--muted);font-size:.95rem}
+    .about-grid{display:grid;grid-template-columns:1fr 1fr;gap:60px;align-items:center}.about p{margin-bottom:16px}.quote{margin-top:25px;padding:18px 21px;border-left:3px solid var(--gold);background:var(--bg2);border-radius:0 10px 10px 0;font-style:italic}
+    .board-wrap{display:flex;justify-content:center}.board{width:min(430px,90vw);aspect-ratio:1;display:grid;grid-template-columns:repeat(8,1fr);border:8px solid #252d38;border-radius:10px;overflow:hidden;box-shadow:0 25px 70px rgba(0,0,0,.4)}.sq{display:grid;place-items:center;font-size:clamp(1.35rem,5vw,2.7rem)}.light{background:#e7d8b5}.dark{background:#75906d}
+    .download{background:var(--bg2);border-block:1px solid var(--border)}.download-box{text-align:center;max-width:760px;margin:auto;padding:62px 28px;background:var(--card);border:1px solid var(--border);border-radius:20px}.download p{margin-bottom:27px}
+    .privacy{max-width:800px}.privacy h2{font-size:2.4rem;margin-bottom:18px}.privacy h3{margin:28px 0 8px}.privacy p{color:var(--muted);margin-bottom:14px}
+    .contact{background:var(--bg2);border-top:1px solid var(--border)}.contact-box{text-align:center;max-width:650px;margin:auto}.contact p{margin-bottom:22px}.email{color:var(--gold);font-weight:750;word-break:break-word}
+    footer{padding:28px 0;border-top:1px solid var(--border);color:var(--muted);font-size:.9rem}.footer{display:flex;justify-content:space-between;gap:20px}.footer-links{display:flex;gap:20px}.footer-links a:hover{color:var(--text)}
+    @media(max-width:800px){.links{display:none}.hero{min-height:550px}.grid{grid-template-columns:1fr}.about-grid{grid-template-columns:1fr;gap:45px}.footer{flex-direction:column;text-align:center}.footer-links{justify-content:center}}
+    @media(max-width:480px){section{padding:65px 0}.buttons{flex-direction:column}.btn{width:100%}h1{letter-spacing:-2px}}
+  </style>
+</head>
+<body>
+
+<nav>
+  <div class="container nav">
+    <a class="logo" href="#"><span class="logo-icon">♞</span>JereChess</a>
+    <div class="links">
+      <a href="#caracteristicas">Características</a>
+      <a href="#sobre">Sobre JereChess</a>
+      <a href="#privacidad">Privacidad</a>
+      <a href="#contacto">Contacto</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <section class="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="badge">♟ Ajedrez hecho para jugadores</div>
+        <h1>Juega.<br>Aprende.<br><span>Mejora.</span></h1>
+        <p>JereChess es una aplicación de ajedrez creada para quienes quieren disfrutar del juego, aprender de sus partidas y seguir mejorando día a día.</p>
+        <div class="buttons">
+          <!-- REEMPLAZA ESTE ENLACE por la URL real de JereChess en Google Play -->
+          <a class="btn primary" href="https://play.google.com/" target="_blank" rel="noopener noreferrer">▶ Descargar en Google Play</a>
+          <a class="btn secondary" href="#caracteristicas">Conocer JereChess</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="caracteristicas" class="features">
+    <div class="container">
+      <div class="head">
+        <h2>Todo lo necesario para disfrutar del ajedrez.</h2>
+        <p>JereChess reúne herramientas para jugar, practicar y analizar tu progreso en una sola aplicación.</p>
+      </div>
+      <div class="grid">
+        <article class="feature"><div class="icon">♟</div><h3>Juega ajedrez</h3><p>Disfruta partidas con diferentes ritmos de juego y niveles de dificultad.</p></article>
+        <article class="feature"><div class="icon">🧩</div><h3>Puzzles</h3><p>Practica posiciones tácticas y pon a prueba tu capacidad para encontrar las mejores jugadas.</p></article>
+        <article class="feature"><div class="icon">📊</div><h3>Analiza tus partidas</h3><p>Revisa tus partidas y descubre oportunidades para comprender mejor tu juego.</p></article>
+        <article class="feature"><div class="icon">🎯</div><h3>Entrenamiento</h3><p>Mejora diferentes aspectos de tu ajedrez mediante ejercicios y herramientas de entrenamiento.</p></article>
+        <article class="feature"><div class="icon">🏆</div><h3>Progreso</h3><p>Sigue tu evolución y establece nuevos objetivos para continuar mejorando.</p></article>
+        <article class="feature"><div class="icon">⚙️</div><h3>Personalización</h3><p>Configura tus partidas y adapta la experiencia a tu forma de jugar.</p></article>
+      </div>
+    </div>
+  </section>
+
+  <section id="sobre">
+    <div class="container about-grid">
+      <div class="about">
+        <h2>Un proyecto nacido del amor por el ajedrez.</h2>
+        <p>JereChess nació como un proyecto independiente con una idea sencilla: crear una experiencia de ajedrez útil, accesible y agradable para jugadores de distintos niveles.</p>
+        <p>La aplicación continúa evolucionando con nuevas funciones, mejoras y herramientas pensadas para hacer que cada partida sea una oportunidad para aprender.</p>
+        <div class="quote">“Cada partida tiene algo que enseñarnos.”</div>
+      </div>
+      <div class="board-wrap">
+        <div class="board" aria-label="Tablero de ajedrez decorativo">
+          <div class="sq light">♜</div><div class="sq dark">♞</div><div class="sq light">♝</div><div class="sq dark">♛</div><div class="sq light">♚</div><div class="sq dark">♝</div><div class="sq light">♞</div><div class="sq dark">♜</div>
+          <div class="sq dark">♟</div><div class="sq light">♟</div><div class="sq dark">♟</div><div class="sq light">♟</div><div class="sq dark">♟</div><div class="sq light">♟</div><div class="sq dark">♟</div><div class="sq light">♟</div>
+          <div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div>
+          <div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div>
+          <div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div>
+          <div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div><div class="sq dark"></div><div class="sq light"></div>
+          <div class="sq light">♙</div><div class="sq dark">♙</div><div class="sq light">♙</div><div class="sq dark">♙</div><div class="sq light">♙</div><div class="sq dark">♙</div><div class="sq light">♙</div><div class="sq dark">♙</div>
+          <div class="sq dark">♖</div><div class="sq light">♘</div><div class="sq dark">♗</div><div class="sq light">♕</div><div class="sq dark">♔</div><div class="sq light">♗</div><div class="sq dark">♘</div><div class="sq light">♖</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="download">
+    <div class="container">
+      <div class="download-box">
+        <h2>Lleva tu ajedrez contigo.</h2>
+        <p>Descarga JereChess y empieza a jugar, practicar y mejorar.</p>
+        <!-- REEMPLAZA ESTE ENLACE por la URL real de JereChess en Google Play -->
+        <a class="btn primary" href="https://play.google.com/" target="_blank" rel="noopener noreferrer">▶ Disponible en Google Play</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacidad">
+    <div class="container">
+      <div class="privacy">
+        <h2>Política de privacidad</h2>
+        <p>En JereChess respetamos la privacidad de nuestros usuarios y nos comprometemos a tratar la información de manera responsable.</p>
+        <h3>Información que puede recopilarse</h3>
+        <p>Dependiendo de las funciones utilizadas, JereChess puede utilizar información necesaria para proporcionar determinadas funcionalidades, como datos relacionados con partidas, progreso y configuración.</p>
+        <h3>Publicidad</h3>
+        <p>JereChess puede utilizar servicios de publicidad de terceros, como Google AdMob. Estos servicios pueden utilizar identificadores publicitarios y tecnologías similares para mostrar anuncios y medir su rendimiento, de acuerdo con sus propias políticas de privacidad.</p>
+        <h3>Servicios de terceros</h3>
+        <p>Algunos servicios utilizados por JereChess pueden procesar información de acuerdo con sus propias políticas de privacidad y condiciones de servicio.</p>
+        <h3>Contacto</h3>
+        <p>Si tienes preguntas relacionadas con la privacidad o el tratamiento de información, puedes contactar al desarrollador mediante los datos indicados en esta página.</p>
+        <p><strong>Última actualización:</strong> agosto de 2026</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="contacto" class="contact">
+    <div class="container">
+      <div class="contact-box">
+        <h2>¿Tienes alguna pregunta?</h2>
+        <p>Para consultas, comentarios o problemas relacionados con JereChess, puedes ponerte en contacto con el desarrollador.</p>
+        <!-- REEMPLAZA ESTE CORREO por tu correo oficial de JereChess -->
+        <a class="email" href="mailto:TU_CORREO@EJEMPLO.COM">TU_CORREO@EJEMPLO.COM</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="container footer">
+    <div>© 2026 JereChess. Todos los derechos reservados.</div>
+    <div class="footer-links"><a href="#privacidad">Privacidad</a><a href="#contacto">Contacto</a></div>
+  </div>
+</footer>
+
+</body>
+</html>
