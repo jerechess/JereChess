@@ -12,7 +12,8 @@ async function mac(secret,data){const key=await crypto.subtle.importKey('raw',en
 async function ticket(payload,secret){const body=b64(encoder.encode(JSON.stringify(payload)));return body+'.'+await mac(secret,body)}
 async function unticket(raw,secret){if(typeof raw!=='string'||raw.length>2500)throw Error('Ticket inválido');const [body,sig,extra]=raw.split('.');if(!body||!sig||extra)throw Error('Ticket inválido');const expected=await mac(secret,body);if(expected.length!==sig.length)throw Error('Ticket inválido');let mismatch=0;for(let i=0;i<sig.length;i++)mismatch|=expected.charCodeAt(i)^sig.charCodeAt(i);if(mismatch)throw Error('Ticket inválido');const obj=JSON.parse(new TextDecoder().decode(unb64(body)));if(!obj.uid||!obj.clock||!obj.nonce||!Number.isFinite(obj.exp)||Date.now()>obj.exp)throw Error('Ticket expirado');return obj}
 const json=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json;charset=utf-8',...extra}});
-function cors(origin,allowed){return origin===allowed?{'access-control-allow-origin':allowed,'vary':'Origin','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,OPTIONS'}:{}}
+function allowedOrigin(origin,allowed){return origin===allowed||(allowed==='https://jerechess.com'&&origin==='https://www.jerechess.com')}
+function cors(origin,allowed){return allowedOrigin(origin,allowed)?{'access-control-allow-origin':origin,'vary':'Origin','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,OPTIONS'}:{}}
 const validClock=(minutes,increment)=>Number.isInteger(minutes)&&minutes>=1&&minutes<=180&&Number.isInteger(increment)&&increment>=0&&increment<=120;
 async function verifiedUser(req,env){
  const authorization=req.headers.get('authorization')||'';
@@ -24,9 +25,9 @@ async function verifiedUser(req,env){
 export default {
  async fetch(req,env){const u=new URL(req.url),origin=req.headers.get('Origin')||'',headers=cors(origin,env.ALLOWED_ORIGIN);
   if(u.pathname==='/health')return json({service:'jerechess-online',phase:'2.4.5',ready:!!env.TICKET_SECRET&&!!env.FIREBASE_PROJECT_ID&&env.FIREBASE_PROJECT_ID!=='REEMPLAZAR_PROJECT_ID'});
-  if(req.method==='OPTIONS')return origin===env.ALLOWED_ORIGIN?new Response(null,{status:204,headers}):new Response(null,{status:403});
+  if(req.method==='OPTIONS')return allowedOrigin(origin,env.ALLOWED_ORIGIN)?new Response(null,{status:204,headers}):new Response(null,{status:403});
   if(!env.TICKET_SECRET||!env.FIREBASE_PROJECT_ID||env.FIREBASE_PROJECT_ID==='REEMPLAZAR_PROJECT_ID')return json({error:'Servidor sin configurar'},503,headers);
-  if(origin!==env.ALLOWED_ORIGIN)return json({error:'Origen no permitido'},403,headers);
+  if(!allowedOrigin(origin,env.ALLOWED_ORIGIN))return json({error:'Origen no permitido'},403,headers);
   if(u.pathname==='/api/me'&&req.method==='GET'){
    try{const uid=await verifiedUser(req,env);
     const stub=env.RESULTS.get(env.RESULTS.idFromName('ledger-v1'));
@@ -47,16 +48,23 @@ export default {
    }catch{return json({error:'No fue posible verificar el acceso a la partida'},401,headers)}
   }
   if(u.pathname==='/api/queue-ticket'&&req.method==='POST'){
-   try{const uid=await verifiedUser(req,env);
-    const {minutes,increment,rated=true}=await req.json();if(typeof rated!=='boolean')return json({error:'Modalidad inválida'},400,headers);if(!validClock(minutes,increment))return json({error:'Tiempo incorrecto'},400,headers);
+   let uid;
+   try{uid=await verifiedUser(req,env)}
+   catch(e){console.warn('Queue auth rejected:',e?.name||'auth_error');return json({error:'No se pudo verificar la sesión de JereChess ID. Cerrá sesión, volvé a entrar y probá otra vez.',code:'AUTH_REJECTED'},401,headers)}
+   const data=await req.json().catch(()=>null);
+   const {minutes,increment,rated=true}=data||{};
+   if(typeof rated!=='boolean')return json({error:'Modalidad inválida'},400,headers);
+   if(!validClock(minutes,increment))return json({error:'Tiempo incorrecto'},400,headers);
+   try{
+    if(!env.RESULTS)throw Error('RESULTS binding absent');
     const ledger=env.RESULTS.get(env.RESULTS.idFromName('ledger-v1'));
     const playerRate=await ledger.fetch('https://internal/rating',{headers:{'x-verified-uid':uid,'x-category':minutes<3?'bullet':minutes<10?'blitz':'rapid'}});
-    if(!playerRate.ok)return json({error:'Elo temporalmente no disponible'},503,headers);
+    if(!playerRate.ok)return json({error:'Servicio de Elo temporalmente no disponible',code:'RATING_SERVICE'},503,headers);
     const {rating:verifiedRating}=await playerRate.json();
-    const data={uid,clock:`${minutes}+${increment}`,rated,estimatedRating:rating(verifiedRating),nonce:crypto.randomUUID(),exp:Date.now()+60000};
-    const signed=await ticket(data,env.TICKET_SECRET);
+    const ticketData={uid,clock:`${minutes}+${increment}`,rated,estimatedRating:rating(verifiedRating),nonce:crypto.randomUUID(),exp:Date.now()+60000};
+    const signed=await ticket(ticketData,env.TICKET_SECRET);
     return json({ticket:signed,queueUrl:`${u.protocol==='https:'?'wss:':'ws:'}//${u.host}/ws?ticket=${encodeURIComponent(signed)}`},200,headers);
-   }catch{return json({error:'No se pudo validar la sesión'},401,headers)}
+   }catch(e){console.error('Queue internal error:',e?.name||'internal_error',e?.message||'');return json({error:'Error interno al preparar la búsqueda. Revisar los registros del Worker.',code:'QUEUE_INTERNAL'},503,headers)}
   }
   if(u.pathname==='/game/ws'&&req.headers.get('Upgrade')?.toLowerCase()==='websocket'){
    try{const v=await unticket(u.searchParams.get('ticket'),env.TICKET_SECRET);if(v.type!=='game'||!v.gameId||!v.uid)return json({error:'Credencial de partida inválida'},403,headers);
