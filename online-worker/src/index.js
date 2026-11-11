@@ -15,6 +15,17 @@ const json=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status
 function allowedOrigin(origin,allowed){return origin===allowed||(allowed==='https://jerechess.com'&&origin==='https://www.jerechess.com')}
 function cors(origin,allowed){return allowedOrigin(origin,allowed)?{'access-control-allow-origin':origin,'vary':'Origin','access-control-allow-headers':'authorization,content-type','access-control-allow-methods':'GET,POST,OPTIONS'}:{}}
 const validClock=(minutes,increment)=>Number.isInteger(minutes)&&minutes>=1&&minutes<=180&&Number.isInteger(increment)&&increment>=0&&increment<=120;
+function safePlayerName(raw){return typeof raw==='string'&&raw.trim()?raw.trim().slice(0,24):null}
+async function playerNameFromProfile(token,env,uid){
+ const url='https://firestore.googleapis.com/v1/projects/'+encodeURIComponent(env.FIREBASE_PROJECT_ID)+'/databases/(default)/documents/jerechess_profiles/'+encodeURIComponent(uid);
+ try{
+  const response=await fetch(url,{headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(4000)});
+  if(!response.ok)return null;
+  const data=await response.json();
+  return safePlayerName(data?.fields?.displayName?.stringValue);
+ }catch{return null}
+}
+
 async function verifiedUser(req,env){
  const authorization=req.headers.get('authorization')||'';
  if(!authorization.startsWith('Bearer '))throw Error('Sesión requerida');
@@ -71,7 +82,8 @@ export default {
     const playerRate=await ledger.fetch('https://internal/rating',{headers:{'x-verified-uid':uid,'x-category':minutes<3?'bullet':minutes<10?'blitz':'rapid'}});
     if(!playerRate.ok)return json({error:'Servicio de Elo temporalmente no disponible',code:'RATING_SERVICE'},503,headers);
     const {rating:verifiedRating}=await playerRate.json();
-    const ticketData={uid,clock:`${minutes}+${increment}`,rated,estimatedRating:rating(verifiedRating),nonce:crypto.randomUUID(),exp:Date.now()+60000};
+    const playerName=await playerNameFromProfile(req.headers.get('authorization').slice(7),env,uid);
+    const ticketData={uid,clock:`${minutes}+${increment}`,rated,estimatedRating:rating(verifiedRating),playerName,nonce:crypto.randomUUID(),exp:Date.now()+60000};
     const signed=await ticket(ticketData,env.TICKET_SECRET);
     return json({ticket:signed,queueUrl:`${u.protocol==='https:'?'wss:':'ws:'}//${u.host}/ws?ticket=${encodeURIComponent(signed)}`},200,headers);
    }catch(e){console.error('Queue internal error:',e?.name||'internal_error',e?.message||'');return json({error:'Error interno al preparar la búsqueda. Revisar los registros del Worker.',code:'QUEUE_INTERNAL'},503,headers)}
@@ -86,7 +98,7 @@ export default {
    try{const v=await unticket(u.searchParams.get('ticket'),env.TICKET_SECRET);
     if(v.type==='game')return json({error:'Tipo de credencial incorrecto'},403,headers);
     const id=env.MATCHMAKER.idFromName('jerechess-queue-v1');
-    return env.MATCHMAKER.get(id).fetch('https://internal/join',{headers:{'Upgrade':'websocket','x-uid':v.uid,'x-clock':v.clock,'x-rated':String(v.rated!==false),'x-rating':String(rating(v.estimatedRating)),'x-nonce':v.nonce}})
+    return env.MATCHMAKER.get(id).fetch('https://internal/join',{headers:{'Upgrade':'websocket','x-uid':v.uid,'x-clock':v.clock,'x-rated':String(v.rated!==false),'x-rating':String(rating(v.estimatedRating)),'x-name':encodeURIComponent(v.playerName||''),'x-nonce':v.nonce}})
    }catch{return json({error:'Ticket expirado o inválido'},401,headers)}
   }
   return json({error:'Ruta desconocida'},404,headers);
@@ -96,14 +108,14 @@ export class Matchmaker {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
  sockets(){return this.ctx.getWebSockets().filter(s=>s.readyState===WebSocket.OPEN)}
  async fetch(req){if(req.headers.get('Upgrade')?.toLowerCase()!=='websocket')return new Response('WebSocket requerido',{status:426});
-  const uid=req.headers.get('x-uid'),clock=req.headers.get('x-clock'),rated=req.headers.get('x-rated')==='true',nonce=req.headers.get('x-nonce'),elo=rating(Number(req.headers.get('x-rating')));
+  const uid=req.headers.get('x-uid'),clock=req.headers.get('x-clock'),rated=req.headers.get('x-rated')==='true',nonce=req.headers.get('x-nonce'),elo=rating(Number(req.headers.get('x-rating'))),name=safePlayerName(decodeURIComponent(req.headers.get('x-name')||''));
   if(!uid||!/^(?:[1-9]\d{0,2})\+(?:0|[1-9]\d{0,2})$/.test(clock)||!nonce)return new Response('Inválido',{status:403});
   const nonceKey=`nonce:${nonce}`;if(await this.ctx.storage.get(nonceKey))return new Response('Ticket ya utilizado',{status:409});
   await this.ctx.storage.put(nonceKey,Date.now()+65000);
   if(!(await this.ctx.storage.getAlarm()))await this.ctx.storage.setAlarm(Date.now()+65000);
   for(const old of this.sockets()){const info=old.deserializeAttachment();if(info?.uid===uid){this.safeSend(old,{type:'error',message:'La cuenta inició otra búsqueda.'});try{old.close(1000,'Búsqueda reemplazada')}catch{}}}
   const pair=new WebSocketPair(),client=pair[0],server=pair[1];this.ctx.acceptWebSocket(server);
-  server.serializeAttachment({uid,clock,rated,rating:elo,nonce,status:'connecting',joinedAt:Date.now()});
+  server.serializeAttachment({uid,clock,rated,rating:elo,name,nonce,status:'connecting',joinedAt:Date.now()});
   return new Response(null,{status:101,webSocket:client});
  }
  safeSend(ws,obj){try{ws.send(JSON.stringify(obj));return true}catch{return false}}
@@ -123,7 +135,7 @@ export class Matchmaker {
    const gameId=crypto.randomUUID(),whiteFirst=crypto.getRandomValues(new Uint8Array(1))[0]%2===0;
    const [minutes,increment]=ai.clock.split('+').map(Number),white=whiteFirst?ai.uid:bi.uid,black=whiteFirst?bi.uid:ai.uid;
    const stub=this.env.GAMES.get(this.env.GAMES.idFromName(gameId));
-   let created=false;try{const response=await stub.fetch('https://internal/init',{method:'POST',body:JSON.stringify({id:gameId,white,black,minutes,increment,rated:ai.rated})});created=response.ok}catch{}
+   let created=false;try{const response=await stub.fetch('https://internal/init',{method:'POST',body:JSON.stringify({id:gameId,white,black,minutes,increment,rated:ai.rated,playerNames:{white:whiteFirst?ai.name:bi.name,black:whiteFirst?bi.name:ai.name},playerRatings:{white:whiteFirst?ai.rating:bi.rating,black:whiteFirst?bi.rating:ai.rating}})});created=response.ok}catch{}
    if(!created){this.safeSend(a,{type:'error',message:'No se pudo crear la partida'});this.safeSend(b,{type:'error',message:'No se pudo crear la partida'});continue}
    const at=Date.now();
    const [ticketA,ticketB]=await Promise.all([

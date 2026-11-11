@@ -10,7 +10,7 @@ export class OnlineGame {
   if(url.pathname==='/init'&&req.method==='POST'){
    const d=await req.json();if(!d.id||!d.white||!d.black||d.white===d.black||!Number.isInteger(d.minutes)||!Number.isInteger(d.increment))return respond({error:'Datos inválidos'},400);
    const existing=await this.read();if(existing)return respond({ok:true,existing:true});
-   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now()};
+   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:typeof d.playerNames?.white==='string'?d.playerNames.white:null,black:typeof d.playerNames?.black==='string'?d.playerNames.black:null},playerRatings:{white:Number.isInteger(d.playerRatings?.white)?d.playerRatings.white:null,black:Number.isInteger(d.playerRatings?.black)?d.playerRatings.black:null},fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now()};
    await this.ctx.storage.put(dataKey,initial);return respond({ok:true});
   }
   if(url.pathname==='/authorize'){const uid=req.headers.get('x-player-uid'),d=await this.read();return d&&[d.white,d.black].includes(uid)?respond({ok:true}):respond({error:'No autorizado'},403)}
@@ -23,7 +23,7 @@ export class OnlineGame {
   }
   return respond({error:'Ruta inválida'},404);
  }
- publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,serverNow:Date.now()}}
+ publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,playerNames:d.playerNames||null,playerRatings:d.playerRatings||null,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,serverNow:Date.now()}}
  broadcast(obj){for(const ws of this.ctx.getWebSockets())safe(ws,obj)}
  async persist(d){d.updatedAt=Date.now();await this.ctx.storage.put(dataKey,d)}
  async settle(d){
