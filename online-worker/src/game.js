@@ -4,6 +4,7 @@ const safe=(ws,obj)=>{try{ws.send(JSON.stringify(obj));return true}catch{return 
 const validSquare=x=>typeof x==='string'&&/^[a-h][1-8]$/.test(x);
 const dataKey='game';
 const REMATCH_TTL_MS=120000;
+const DRAW_TTL_MS=60000;
 const validRematch=d=>d?.rematch?.status==='pending'&&Date.now()<d.rematch.expiresAt;
 export class OnlineGame {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
@@ -12,7 +13,7 @@ export class OnlineGame {
   if(url.pathname==='/init'&&req.method==='POST'){
    const d=await req.json();if(!d.id||!d.white||!d.black||d.white===d.black||!Number.isInteger(d.minutes)||!Number.isInteger(d.increment))return respond({error:'Datos inválidos'},400);
    const existing=await this.read();if(existing)return respond({ok:true,existing:true});
-   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:typeof d.playerNames?.white==='string'?d.playerNames.white:null,black:typeof d.playerNames?.black==='string'?d.playerNames.black:null},playerRatings:{white:Number.isInteger(d.playerRatings?.white)?d.playerRatings.white:null,black:Number.isInteger(d.playerRatings?.black)?d.playerRatings.black:null},fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now(),rematch:null};
+   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:typeof d.playerNames?.white==='string'?d.playerNames.white:null,black:typeof d.playerNames?.black==='string'?d.playerNames.black:null},playerRatings:{white:Number.isInteger(d.playerRatings?.white)?d.playerRatings.white:null,black:Number.isInteger(d.playerRatings?.black)?d.playerRatings.black:null},fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now(),rematch:null,drawOffer:null,drawAttempts:{}};
    await this.ctx.storage.put(dataKey,initial);return respond({ok:true});
   }
   if(url.pathname==='/authorize'){const uid=req.headers.get('x-player-uid'),d=await this.read();return d&&[d.white,d.black].includes(uid)?respond({ok:true}):respond({error:'No autorizado'},403)}
@@ -25,7 +26,7 @@ export class OnlineGame {
   }
   return respond({error:'Ruta inválida'},404);
  }
- publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,playerNames:d.playerNames||null,playerRatings:d.playerRatings||null,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,rematch:d.rematch||null,serverNow:Date.now()}}
+ publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,playerNames:d.playerNames||null,playerRatings:d.playerRatings||null,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,rematch:d.rematch||null,drawOffer:d.drawOffer||null,serverNow:Date.now()}}
  broadcast(obj){for(const ws of this.ctx.getWebSockets())safe(ws,obj)}
  async persist(d){d.updatedAt=Date.now();await this.ctx.storage.put(dataKey,d)}
  async settle(d){
@@ -37,7 +38,7 @@ export class OnlineGame {
   }catch{await this.ctx.storage.setAlarm(Date.now()+5000)}
  }
  async finish(d){await this.persist(d);await this.settle(d);this.broadcast({type:'state',...this.publicState(d)})}
- async setAlarm(d){if(d.result||!d.runningSince)return;const c=new Chess(d.fen).turn(),due=d.runningSince+d.remaining[c];await this.ctx.storage.setAlarm(Math.max(Date.now()+1,due))}
+ async setAlarm(d){if(d.result)return;const c=new Chess(d.fen).turn();const clockDue=d.runningSince?d.runningSince+d.remaining[c]:Infinity;const drawDue=d.drawOffer?.status==='pending'?d.drawOffer.expiresAt:Infinity;const due=Math.min(clockDue,drawDue);if(Number.isFinite(due))await this.ctx.storage.setAlarm(Math.max(Date.now()+1,due));}
  async checkTime(d,now){if(d.result||!d.runningSince)return false;const side=new Chess(d.fen).turn();if(now-d.runningSince<d.remaining[side])return false;
   d.remaining[side]=0;d.runningSince=null;d.result=side==='w'?'0-1':'1-0';d.reason='tiempo';await this.finish(d);return true}
  async webSocketMessage(ws,message){const info=ws.deserializeAttachment();if(!info?.uid)return;let m;
@@ -47,6 +48,7 @@ export class OnlineGame {
   const d=await this.read();if(!d)return;const uid=info.uid,side=uid===d.white?'w':uid===d.black?'b':null;if(!side)return;
   if(m.type==='sync'){await this.checkTime(d,Date.now());safe(ws,{type:'state',...this.publicState(await this.read())});return}
   if(['rematch_request','rematch_accept','rematch_decline','rematch_cancel'].includes(m.type)){await this.handleRematch(ws,d,uid,m.type);return}
+  if(['draw_offer','draw_accept','draw_decline'].includes(m.type)){await this.handleDrawOffer(ws,d,uid,m.type);return}
   if(d.result){safe(ws,{type:'error',message:'La partida ya terminó'});return}
   const now=Date.now();if(await this.checkTime(d,now))return;
   if(m.type==='resign'){d.result=side==='w'?'0-1':'1-0';d.reason='rendición';d.runningSince=null;await this.finish(d);return}
@@ -57,11 +59,45 @@ export class OnlineGame {
   if(!candidate){safe(ws,{type:'error',message:'Jugada ilegal'});return}
   if(d.started){d.remaining[side]=Math.max(0,d.remaining[side]-(now-d.runningSince))}
   d.remaining[side]+=d.increment*1000;d.started=true;d.runningSince=now;
+  if(d.drawOffer?.status==='pending')d.drawOffer={...d.drawOffer,status:'declined'};
   d.fen=chess.fen();d.moves.push({from:candidate.from,to:candidate.to,promotion:candidate.promotion||null,san:candidate.san,fen:d.fen});
   if(chess.isGameOver()){d.result=chess.isCheckmate()?(side==='w'?'1-0':'0-1'):'1/2-1/2';d.reason=chess.isCheckmate()?'jaque mate':'tablas';d.runningSince=null}
   if(d.result)await this.finish(d);else{await this.persist(d);await this.setAlarm(d);this.broadcast({type:'state',...this.publicState(d)})}
  }
 
+ async handleDrawOffer(ws,d,uid,action){
+  if(d.result){safe(ws,{type:'error',message:'La partida ya terminó.'});return}
+  const now=Date.now();
+  if(d.drawOffer?.status==='pending'&&now>=d.drawOffer.expiresAt){
+   d.drawOffer={...d.drawOffer,status:'expired'};
+   await this.persist(d);
+   this.broadcast({type:'state',...this.publicState(d)});
+  }
+  const pending=d.drawOffer?.status==='pending'&&now<d.drawOffer.expiresAt;
+  if(action==='draw_offer'){
+   if(pending){safe(ws,{type:'error',message:'Ya hay una propuesta de tablas pendiente.'});return}
+   const ply=d.moves.length;
+   if(d.drawAttempts?.[uid]===ply){safe(ws,{type:'error',message:'Ya propusiste tablas en esta jugada.'});return}
+   d.drawAttempts={...(d.drawAttempts||{}),[uid]:ply};
+   d.drawOffer={status:'pending',requestedBy:uid,expiresAt:now+DRAW_TTL_MS,ply};
+   await this.persist(d);
+   this.broadcast({type:'state',...this.publicState(d)});
+   const turn=new Chess(d.fen).turn(),clockDue=d.runningSince?d.runningSince+d.remaining[turn]:Infinity;
+   await this.ctx.storage.setAlarm(Math.max(now+1,Math.min(clockDue,now+DRAW_TTL_MS)));
+   return;
+  }
+  if(!pending){safe(ws,{type:'error',message:'La propuesta de tablas ya no está disponible.'});return}
+  if(d.drawOffer.requestedBy===uid){safe(ws,{type:'error',message:'El rival debe responder a la propuesta.'});return}
+  if(action==='draw_decline')d.drawOffer={...d.drawOffer,status:'declined'};
+  else if(action==='draw_accept'){
+   d.drawOffer={...d.drawOffer,status:'accepted'};
+   d.result='1/2-1/2';d.reason='tablas por acuerdo';d.runningSince=null;
+   await this.finish(d);return;
+  }
+  await this.persist(d);
+  this.broadcast({type:'state',...this.publicState(d)});
+  await this.setAlarm(d);
+ }
  async handleRematch(ws,d,uid,action){
   if(!d.result){safe(ws,{type:'error',message:'La revancha está disponible al terminar la partida.'});return}
   const now=Date.now();
@@ -117,6 +153,7 @@ export class OnlineGame {
   this.broadcast({type:'state',...this.publicState(d)});
  }
  async alarm(){const d=await this.read();if(!d)return;
+  if(d.drawOffer?.status==='pending'&&Date.now()>=d.drawOffer.expiresAt){d.drawOffer={...d.drawOffer,status:'expired'};await this.persist(d);this.broadcast({type:'state',...this.publicState(d)})}
   if(d.rematch?.status==='pending'&&Date.now()>=d.rematch.expiresAt){d.rematch={...d.rematch,status:'expired'};await this.persist(d);this.broadcast({type:'state',...this.publicState(d)})}
   if(d.result){await this.settle(d);if(d.settlement)this.broadcast({type:'state',...this.publicState(d)});return}
   await this.checkTime(d,Date.now());const fresh=await this.read();if(fresh&&!fresh.result)await this.setAlarm(fresh)}
