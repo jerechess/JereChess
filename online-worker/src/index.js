@@ -24,7 +24,17 @@ async function verifiedUser(req,env){
 }
 export default {
  async fetch(req,env){const u=new URL(req.url),origin=req.headers.get('Origin')||'',headers=cors(origin,env.ALLOWED_ORIGIN);
-  if(u.pathname==='/health')return json({service:'jerechess-online',phase:'2.4.5',ready:!!env.TICKET_SECRET&&!!env.FIREBASE_PROJECT_ID&&env.FIREBASE_PROJECT_ID!=='REEMPLAZAR_PROJECT_ID'});
+  if(u.pathname==='/health'){
+   const configured=!!env.TICKET_SECRET&&!!env.FIREBASE_PROJECT_ID&&env.FIREBASE_PROJECT_ID!=='REEMPLAZAR_PROJECT_ID';
+   const bindings={matchmaker:!!env.MATCHMAKER,games:!!env.GAMES,results:!!env.RESULTS};
+   let ratingService='unavailable',diagnostic=null;
+   if(bindings.results){try{
+    const ledger=env.RESULTS.get(env.RESULTS.idFromName('ledger-v1'));
+    const check=await ledger.fetch('https://internal/rating',{headers:{'x-verified-uid':'healthcheck-readonly','x-category':'blitz'}});
+    ratingService=check.ok?'ok':'http_'+check.status;
+   }catch(e){ratingService='error';diagnostic=String(e?.name||'RuntimeError')}}
+   return json({service:'jerechess-online',phase:'2.4.5',ready:configured&&Object.values(bindings).every(Boolean)&&ratingService==='ok',configured,bindings,ratingService,...(diagnostic?{diagnostic}:{})});
+  }
   if(req.method==='OPTIONS')return allowedOrigin(origin,env.ALLOWED_ORIGIN)?new Response(null,{status:204,headers}):new Response(null,{status:403});
   if(!env.TICKET_SECRET||!env.FIREBASE_PROJECT_ID||env.FIREBASE_PROJECT_ID==='REEMPLAZAR_PROJECT_ID')return json({error:'Servidor sin configurar'},503,headers);
   if(!allowedOrigin(origin,env.ALLOWED_ORIGIN))return json({error:'Origen no permitido'},403,headers);
