@@ -1,0 +1,31 @@
+name = "jerechess-online"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+FIREBASE_PROJECT_ID = "jerechess-a4224"
+ALLOWED_ORIGIN = "https://jerechess.com"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Matchmaker"]
+
+[[durable_objects.bindings]]
+name = "GAMES"
+class_name = "OnlineGame"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["OnlineGame"]
+
+[[durable_objects.bindings]]
+name = "RESULTS"
+class_name = "OnlineResults"
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["OnlineResults"]
