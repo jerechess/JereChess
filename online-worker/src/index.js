@@ -8,7 +8,7 @@ const GOOGLE_JWKS=createRemoteJWKSet(new URL('https://www.googleapis.com/service
 const encoder=new TextEncoder();
 const b64=b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_');
 const unb64=s=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-s.length%4)%4)),c=>c.charCodeAt(0));
-async function mac(secret,data){const key=await crypto.subtle.importKey('raw',encoder.encode(secret),'HMAC',false,['sign']);return b64(await crypto.subtle.sign('HMAC',key,encoder.encode(data)))}
+async function mac(secret,data){const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign']);return b64(await crypto.subtle.sign('HMAC',key,encoder.encode(data)))}
 async function ticket(payload,secret){const body=b64(encoder.encode(JSON.stringify(payload)));return body+'.'+await mac(secret,body)}
 async function unticket(raw,secret){if(typeof raw!=='string'||raw.length>2500)throw Error('Ticket inválido');const [body,sig,extra]=raw.split('.');if(!body||!sig||extra)throw Error('Ticket inválido');const expected=await mac(secret,body);if(expected.length!==sig.length)throw Error('Ticket inválido');let mismatch=0;for(let i=0;i<sig.length;i++)mismatch|=expected.charCodeAt(i)^sig.charCodeAt(i);if(mismatch)throw Error('Ticket inválido');const obj=JSON.parse(new TextDecoder().decode(unb64(body)));if(!obj.uid||!obj.clock||!obj.nonce||!Number.isFinite(obj.exp)||Date.now()>obj.exp)throw Error('Ticket expirado');return obj}
 const json=(body,status=200,extra={})=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json;charset=utf-8',...extra}});
