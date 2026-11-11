@@ -3,6 +3,8 @@ const respond=(obj,status=200)=>new Response(JSON.stringify(obj),{status,headers
 const safe=(ws,obj)=>{try{ws.send(JSON.stringify(obj));return true}catch{return false}};
 const validSquare=x=>typeof x==='string'&&/^[a-h][1-8]$/.test(x);
 const dataKey='game';
+const REMATCH_TTL_MS=120000;
+const validRematch=d=>d?.rematch?.status==='pending'&&Date.now()<d.rematch.expiresAt;
 export class OnlineGame {
  constructor(ctx,env){this.ctx=ctx;this.env=env}
  async read(){return this.ctx.storage.get(dataKey)}
@@ -10,7 +12,7 @@ export class OnlineGame {
   if(url.pathname==='/init'&&req.method==='POST'){
    const d=await req.json();if(!d.id||!d.white||!d.black||d.white===d.black||!Number.isInteger(d.minutes)||!Number.isInteger(d.increment))return respond({error:'Datos inválidos'},400);
    const existing=await this.read();if(existing)return respond({ok:true,existing:true});
-   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:typeof d.playerNames?.white==='string'?d.playerNames.white:null,black:typeof d.playerNames?.black==='string'?d.playerNames.black:null},playerRatings:{white:Number.isInteger(d.playerRatings?.white)?d.playerRatings.white:null,black:Number.isInteger(d.playerRatings?.black)?d.playerRatings.black:null},fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now()};
+   const initial={id:d.id,white:d.white,black:d.black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:typeof d.playerNames?.white==='string'?d.playerNames.white:null,black:typeof d.playerNames?.black==='string'?d.playerNames.black:null},playerRatings:{white:Number.isInteger(d.playerRatings?.white)?d.playerRatings.white:null,black:Number.isInteger(d.playerRatings?.black)?d.playerRatings.black:null},fen:new Chess().fen(),moves:[],remaining:{w:d.minutes*60000,b:d.minutes*60000},runningSince:null,started:false,result:null,reason:null,settlement:null,createdAt:Date.now(),updatedAt:Date.now(),rematch:null};
    await this.ctx.storage.put(dataKey,initial);return respond({ok:true});
   }
   if(url.pathname==='/authorize'){const uid=req.headers.get('x-player-uid'),d=await this.read();return d&&[d.white,d.black].includes(uid)?respond({ok:true}):respond({error:'No autorizado'},403)}
@@ -23,7 +25,7 @@ export class OnlineGame {
   }
   return respond({error:'Ruta inválida'},404);
  }
- publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,playerNames:d.playerNames||null,playerRatings:d.playerRatings||null,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,serverNow:Date.now()}}
+ publicState(d){return {gameId:d.id,white:d.white,black:d.black,clock:`${d.minutes}+${d.increment}`,rated:d.rated,playerNames:d.playerNames||null,playerRatings:d.playerRatings||null,fen:d.fen,moves:d.moves,remaining:d.remaining,runningSince:d.runningSince,started:d.started,result:d.result,reason:d.reason,settlement:d.settlement,rematch:d.rematch||null,serverNow:Date.now()}}
  broadcast(obj){for(const ws of this.ctx.getWebSockets())safe(ws,obj)}
  async persist(d){d.updatedAt=Date.now();await this.ctx.storage.put(dataKey,d)}
  async settle(d){
@@ -44,6 +46,7 @@ export class OnlineGame {
   if(m?.type==='ping'){safe(ws,{type:'pong',serverNow:Date.now()});return}
   const d=await this.read();if(!d)return;const uid=info.uid,side=uid===d.white?'w':uid===d.black?'b':null;if(!side)return;
   if(m.type==='sync'){await this.checkTime(d,Date.now());safe(ws,{type:'state',...this.publicState(await this.read())});return}
+  if(['rematch_request','rematch_accept','rematch_decline','rematch_cancel'].includes(m.type)){await this.handleRematch(ws,d,uid,m.type);return}
   if(d.result){safe(ws,{type:'error',message:'La partida ya terminó'});return}
   const now=Date.now();if(await this.checkTime(d,now))return;
   if(m.type==='resign'){d.result=side==='w'?'0-1':'1-0';d.reason='rendición';d.runningSince=null;await this.finish(d);return}
@@ -58,7 +61,64 @@ export class OnlineGame {
   if(chess.isGameOver()){d.result=chess.isCheckmate()?(side==='w'?'1-0':'0-1'):'1/2-1/2';d.reason=chess.isCheckmate()?'jaque mate':'tablas';d.runningSince=null}
   if(d.result)await this.finish(d);else{await this.persist(d);await this.setAlarm(d);this.broadcast({type:'state',...this.publicState(d)})}
  }
- async alarm(){const d=await this.read();if(!d)return;if(d.result){await this.settle(d);if(d.settlement)this.broadcast({type:'state',...this.publicState(d)});return}
+
+ async handleRematch(ws,d,uid,action){
+  if(!d.result){safe(ws,{type:'error',message:'La revancha está disponible al terminar la partida.'});return}
+  const now=Date.now();
+  if(d.rematch?.status==='pending'&&now>=d.rematch.expiresAt){
+   d.rematch={...d.rematch,status:'expired'};
+   await this.persist(d);
+   this.broadcast({type:'state',...this.publicState(d)});
+  }
+  const previous=d.rematch;
+  if(action==='rematch_request'){
+   if(previous?.status==='accepted'){safe(ws,{type:'error',message:'Ya se creó una revancha.'});return}
+   if(previous?.status==='pending'){
+    if(previous.requestedBy===uid){safe(ws,{type:'state',...this.publicState(d)});return}
+    safe(ws,{type:'error',message:'Tu rival ya te propuso revancha. Podés aceptarla o rechazarla.'});return;
+   }
+   const attempts=d.rematchAttempts||{};
+   if(attempts[uid]){safe(ws,{type:'error',message:'Ya solicitaste revancha en esta partida.'});return}
+   d.rematchAttempts={...attempts,[uid]:true};
+   d.rematch={status:'pending',requestedBy:uid,expiresAt:now+REMATCH_TTL_MS};
+   await this.persist(d);
+   this.broadcast({type:'state',...this.publicState(d)});
+   await this.ctx.storage.setAlarm(now+REMATCH_TTL_MS);
+   return;
+  }
+  if(!validRematch(d)){safe(ws,{type:'error',message:'La solicitud de revancha ya no está disponible.'});return}
+  const requester=d.rematch.requestedBy;
+  if(action==='rematch_cancel'){
+   if(uid!==requester){safe(ws,{type:'error',message:'Solo quien solicitó la revancha puede cancelarla.'});return}
+   d.rematch={...d.rematch,status:'cancelled'};
+  }else if(action==='rematch_decline'){
+   if(uid===requester){safe(ws,{type:'error',message:'No podés rechazar tu propia solicitud.'});return}
+   d.rematch={...d.rematch,status:'declined'};
+  }else if(action==='rematch_accept'){
+   if(uid===requester){safe(ws,{type:'error',message:'La revancha debe aceptarla el otro jugador.'});return}
+   const newId=crypto.randomUUID(),white=d.black,black=d.white;
+   let newRatings={white:d.playerRatings?.black??null,black:d.playerRatings?.white??null};
+   if(this.env.RESULTS){
+    try{
+     const ledger=this.env.RESULTS.get(this.env.RESULTS.idFromName('ledger-v1'));
+     const category=d.minutes<3?'bullet':d.minutes<10?'blitz':'rapid';
+     const [w,b]=await Promise.all([white,black].map(player=>ledger.fetch('https://internal/rating',{headers:{'x-verified-uid':player,'x-category':category}})));
+     if(w.ok&&b.ok){const wRating=(await w.json()).rating,bRating=(await b.json()).rating;if(Number.isInteger(wRating)&&Number.isInteger(bRating))newRatings={white:wRating,black:bRating}}
+    }catch{}
+   }
+   const candidate=this.env.GAMES.get(this.env.GAMES.idFromName(newId));
+   try{
+    const created=await candidate.fetch('https://internal/init',{method:'POST',body:JSON.stringify({id:newId,white,black,minutes:d.minutes,increment:d.increment,rated:d.rated,playerNames:{white:d.playerNames?.black||null,black:d.playerNames?.white||null},playerRatings:newRatings})});
+    if(!created.ok)throw Error('No se pudo crear la nueva partida');
+   }catch{safe(ws,{type:'error',message:'No se pudo preparar la revancha. Intentá aceptarla otra vez.'});return}
+   d.rematch={...d.rematch,status:'accepted',newGameId:newId,acceptedAt:Date.now()};
+  }
+  await this.persist(d);
+  this.broadcast({type:'state',...this.publicState(d)});
+ }
+ async alarm(){const d=await this.read();if(!d)return;
+  if(d.rematch?.status==='pending'&&Date.now()>=d.rematch.expiresAt){d.rematch={...d.rematch,status:'expired'};await this.persist(d);this.broadcast({type:'state',...this.publicState(d)})}
+  if(d.result){await this.settle(d);if(d.settlement)this.broadcast({type:'state',...this.publicState(d)});return}
   await this.checkTime(d,Date.now());const fresh=await this.read();if(fresh&&!fresh.result)await this.setAlarm(fresh)}
  async webSocketClose(ws){try{ws.close(1000)}catch{}}
  async webSocketError(ws){try{ws.close(1011)}catch{}}
