@@ -1,0 +1,8 @@
+{
+  "name": "jerechess-online-245",
+  "private": true,
+  "type": "module",
+  "scripts": {"dev": "wrangler dev", "deploy": "wrangler deploy", "check": "node --check src/index.js", "test": "node --test *.test.mjs"},
+  "dependencies": {"jose": "^6.0.0", "chess.js": "^1.4.0"},
+  "devDependencies": {"wrangler": "^4.0.0"}
+}
